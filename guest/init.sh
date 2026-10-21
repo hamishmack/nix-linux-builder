@@ -81,10 +81,22 @@ fi
 busybox mkdir -p /mnt/root/dev/shm
 busybox mount -t tmpfs tmpfs /mnt/root/dev/shm -o rw,nosuid,nodev
 
+# Pseudo-terminals: nlb-watchdog runs the builder on one (as the nix daemon
+# does on Linux), and builders that want a pty of their own can open one.
+busybox mkdir -p /mnt/root/dev/pts
+busybox mount -t devpts devpts /mnt/root/dev/pts -o gid=5,mode=620,ptmxmode=666
+
 # Copy busybox into the new root (the initramfs will be freed by switch_root)
 busybox mkdir -p /mnt/root/bin
 busybox cp /bin/busybox /mnt/root/bin/busybox
 busybox ln -sf ./busybox /mnt/root/bin/sh
+busybox cp /bin/nlb-watchdog /mnt/root/bin/nlb-watchdog
+
+# ── Hang diagnostics (root-only, see guest/nlb-watchdog.c) ───────────────
+# /run/nlb is mode 700: the build (nixbld) cannot see into it.  The watchdog
+# stages snapshots on this tmpfs before copying them to the diag share.
+busybox mkdir -p /mnt/root/run/nlb
+busybox chmod 700 /mnt/root/run/nlb
 
 # ── Networking (optional, only if eth0 exists) ────────────────────────────
 
@@ -110,6 +122,13 @@ busybox mount -t virtiofs nix-store /mnt/root/nix/store
 # The guest writes .exitcode here on completion.
 busybox mkdir -p /mnt/root/build-info
 busybox mount -t virtiofs buildroot /mnt/root/build-info
+
+# diag: the host's per-build hang-snapshot directory (--diag-dir).  The host
+# names it on the command line (nlb.diag_dir) only when it shares one.
+if busybox grep -q 'nlb\.diag_dir=' /mnt/root/proc/cmdline 2>/dev/null; then
+    busybox mkdir -p /mnt/root/run/nlb/diag
+    busybox mount -t virtiofs diag /mnt/root/run/nlb/diag
+fi
 
 # ── Early shell/debug detection ──────────────────────────────────────────
 # Detect mode from kernel command line BEFORE expensive ext4 setup.
@@ -379,12 +398,16 @@ set -a
 set +a
 /bin/busybox rm /execenv
 
-# Run the actual builder as the nix build user.
+# Run the actual builder as the nix build user, under nlb-watchdog.
+# The watchdog relays the build output to hvc0 and, if the build goes silent,
+# captures diagnostics (thresholds from nlb.hang_* on the kernel command
+# line; all off unless the host sets them).  It exits with the builder's
+# exit code, or 124 when it fails a hung build.
 # The nixbld UID matches the host's build user (detected from VirtioFS).
 # stdin is /dev/null because nix builds are non-interactive.
 # Note: \$builder is a nix store path (no shell metacharacters) — safe to use unquoted.
 set +e
-/bin/busybox setuidgid nixbld $builder $args_str < /dev/null
+/bin/nlb-watchdog -- /bin/busybox setuidgid nixbld $builder $args_str < /dev/null
 echo \$? > /build-info/.exitcode
 INITEOF
 fi

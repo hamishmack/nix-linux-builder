@@ -157,11 +157,26 @@
           inherit linuxVersion linuxSrc;
         };
 
+        guest-watchdog = import ./nix/watchdog.nix {
+          pkgs = linuxPkgs;
+          src = ./guest;
+        };
+
         guest-initrd = import ./nix/initrd.nix {
           pkgs = linuxPkgs;
           guestInit = ./guest/init.sh;
+          watchdog = self.packages.${linuxSystem}.guest-watchdog;
         };
       };
+
+      # Behavioural tests for the watchdog: thresholds of a few seconds,
+      # about a minute in all.  Runs in any Linux sandbox (it needs a pty).
+      checks.${linuxSystem}.guest-watchdog =
+        linuxPkgs.runCommand "nlb-watchdog-test" { } ''
+          sh ${./tests/guest/watchdog-test.sh} \
+            ${self.packages.${linuxSystem}.guest-watchdog}/bin/nlb-watchdog
+          touch $out
+        '';
 
       # ── Pre-built guest components (fetched on macOS, no linux builder) ─
       # These use darwinPkgs.fetchurl so macOS users can bootstrap without

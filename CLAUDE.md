@@ -8,6 +8,9 @@ Open-source alternative to the QEMU-based nix-darwin linux-builder.
 - Objective-C for Virtualization.framework integration (src/vm_config.m, src/vm_lifecycle.m)
 - Minimal guest Linux kernel + initrd built with Nix (nix/kernel.nix, nix/initrd.nix)
 - Guest init script in busybox sh (guest/init.sh)
+- Guest build watchdog in static C (guest/nlb-watchdog.c): runs the builder on a
+  pty, relays output to hvc0, diagnoses silent builds (tests: tests/guest/,
+  `checks.aarch64-linux.guest-watchdog`)
 
 ## Protocol
 - nix daemon writes `build.json` to `topTmpDir/` and exec's the builder with path as last arg

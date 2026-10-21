@@ -40,6 +40,11 @@ static const struct option long_options[] = {
     { "shell",        no_argument,       NULL, 's' },
     { "debug",        no_argument,       NULL, 'd' },
     { "verbose",      no_argument,       NULL, 'v' },
+    { "diag-dir",      required_argument, NULL, 'D' },
+    { "hang-snapshot", required_argument, NULL, 'S' },
+    { "hang-interval", required_argument, NULL, 'I' },
+    { "hang-stopcont", required_argument, NULL, 'C' },
+    { "hang-fail",     required_argument, NULL, 'F' },
     { "help",         no_argument,       NULL, 'h' },
     { NULL, 0, NULL, 0 }
 };
@@ -63,8 +68,34 @@ void nlb_cli_usage(const char *prog)
         "  --shell                 Interactive shell mode (build.json optional)\n"
         "  --debug                 Drop to shell on build failure (requires --shell and build.json)\n"
         "  -v, --verbose           Verbose logging to stderr\n"
+        "\n"
+        "Hang diagnostics (seconds of build-log silence, 0 = off):\n"
+        "  --diag-dir <dir>        Keep hang snapshots in <dir>/<time>-<name>-<pid>/\n"
+        "  --hang-snapshot <s>     Snapshot the build's processes after <s> (default: 0)\n"
+        "  --hang-interval <s>     ...and every <s> after that (default: 600)\n"
+        "  --hang-stopcont <s>     SIGSTOP/SIGCONT the build once after <s> (default: 0)\n"
+        "  --hang-fail <s>         Print a diagnosis and fail the build after <s> (default: 0);\n"
+        "                          keep it below nix's max-silent-time\n"
         "  -h, --help              Show this help\n",
         prog, prog);
+}
+
+/* Parse a non-negative number of seconds for option `name`. */
+static int parse_secs(const char *arg, const char *name, uint32_t *out)
+{
+    if (arg[0] == '-') {
+        LOG_ERR("invalid --%s: %s", name, arg);
+        return -1;
+    }
+    char *endptr;
+    errno = 0;
+    unsigned long val = strtoul(arg, &endptr, 10);
+    if (errno != 0 || *endptr != '\0' || endptr == arg || val > UINT32_MAX) {
+        LOG_ERR("invalid --%s: %s", name, arg);
+        return -1;
+    }
+    *out = (uint32_t)val;
+    return 0;
 }
 
 int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
@@ -145,6 +176,29 @@ int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
             break;
         case 'v':
             opts->verbose = true;
+            break;
+        case 'D':
+            if (!optarg[0]) {
+                LOG_ERR("--diag-dir cannot be empty");
+                return -1;
+            }
+            opts->diag_dir = optarg;
+            break;
+        case 'S':
+            if (parse_secs(optarg, "hang-snapshot", &opts->hang_snapshot) != 0)
+                return -1;
+            break;
+        case 'I':
+            if (parse_secs(optarg, "hang-interval", &opts->hang_interval) != 0)
+                return -1;
+            break;
+        case 'C':
+            if (parse_secs(optarg, "hang-stopcont", &opts->hang_stopcont) != 0)
+                return -1;
+            break;
+        case 'F':
+            if (parse_secs(optarg, "hang-fail", &opts->hang_fail) != 0)
+                return -1;
             break;
         case 'h':
             nlb_cli_usage(argv[0]);

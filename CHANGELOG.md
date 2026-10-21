@@ -4,6 +4,34 @@ All notable changes to nix-linux-builder are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Hang diagnostics for builds that stop producing output.** The guest now
+  runs the builder under `nlb-watchdog` (guest/nlb-watchdog.c), which relays
+  its output to hvc0 from a pseudo-terminal and so knows when the build has
+  gone silent. At thresholds set with the new `--hang-*` options (all off by
+  default) it:
+  - writes snapshots of every build process and thread to `--diag-dir`:
+    state, wchan, syscall, kernel stack, CPU and context switches since the
+    last snapshot, I/O counters, PSI, `/proc/stat` (including steal) and the
+    kernel log, with hung-task reports. Snapshots are staged on tmpfs and copied out by a child
+    process, so a stalled VirtioFS share cannot wedge the watchdog;
+  - optionally sends SIGSTOP/SIGCONT to the build once and records whether it
+    starts again (a lost futex wakeup does);
+  - optionally prints a verdict (`VIRTIOFS`, `KERNEL-BLOCKED`, `BUSY`, `IDLE`)
+    and a thread summary to the build log and fails the build with exit code
+    124, before nix's max-silent-time kills the VM and the evidence with it.
+
+  The darwin module exposes this as `services.nix-linux-builder.hangDiagnostics`,
+  creates the snapshot directory and prunes it daily. The guest kernel gains
+  `DETECT_HUNG_TASK`, `STACKTRACE`, `PSI` and task I/O
+  accounting for it.
+
+### Changed
+- **The builder's stdout and stderr are a pseudo-terminal**, not hvc0 itself,
+  and `/dev/pts` is mounted in the guest. The builder still sees a terminal
+  (as it does under the nix daemon on Linux), with output post-processing off
+  as before, so no `\r` reaches the log.
+
 ### Fixed
 - **The code-signing entitlement now survives into the nix store.** The host
   binary was signed in `installPhase`, but stdenv's fixup re-signs Mach-O

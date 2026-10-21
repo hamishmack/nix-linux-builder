@@ -75,6 +75,22 @@ let
     CONFIG_BINFMT_SCRIPT=y
     CONFIG_BINFMT_MISC=y
 
+    # ── Hang diagnostics (guest/nlb-watchdog.c) ──────────────────────
+    # Pseudo-terminals for the builder's output.
+    CONFIG_UNIX98_PTYS=y
+    # Report tasks stuck in D state for 10 min to the kernel log.
+    CONFIG_DETECT_HUNG_TASK=y
+    CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=600
+    # /proc/<pid>/stack (kernel stacks) and symbolic wchan.
+    CONFIG_STACKTRACE=y
+    CONFIG_KALLSYMS=y
+    # /proc/pressure/{cpu,io,memory}.
+    CONFIG_PSI=y
+    # read_bytes / write_bytes in /proc/<pid>/io.
+    CONFIG_TASKSTATS=y
+    CONFIG_TASK_XACCT=y
+    CONFIG_TASK_IO_ACCOUNTING=y
+
     # ── TTY / Console ─────────────────────────────────────────────────
     CONFIG_TTY=y
     CONFIG_VT=n

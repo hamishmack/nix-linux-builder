@@ -9,6 +9,7 @@
  *   - VZVirtioFileSystemDeviceConfiguration "nix-store": /nix/store (host r/w)
  *   - VZVirtioFileSystemDeviceConfiguration "buildroot": topTmpDir (host r/w)
  *   - VZVirtioFileSystemDeviceConfiguration "rosetta": Rosetta share (x86_64 only)
+ *   - VZVirtioFileSystemDeviceConfiguration "diag": hang snapshots (--diag-dir)
  *   - VZVirtioEntropyDeviceConfiguration: guest /dev/random
  *   - VZVirtioTraditionalMemoryBalloonDeviceConfiguration
  *   - Optional VZNATNetworkDeviceAttachment for networking
@@ -18,6 +19,7 @@
 #include "log.h"
 
 #import <Foundation/Foundation.h>
+#include <unistd.h>
 
 /* Build the kernel command line for the guest.
  * Flags like ramdisk_tmp are passed here so the guest init can read
@@ -45,6 +47,26 @@ static NSString *kernel_cmdline(const nlb_cli_opts *opts)
         [cmdline appendString:@" nlb.shell"];
     if (opts->debug)
         [cmdline appendString:@" nlb.debug"];
+
+    /* Hang diagnostics, read by guest/nlb-watchdog.c.  A threshold of 0 is
+     * left out (off).  nlb.diag_host only labels the summary in the build
+     * log, so a reader knows where on this host the snapshots are. */
+    if (opts->hang_snapshot)
+        [cmdline appendFormat:@" nlb.hang_snapshot=%u", opts->hang_snapshot];
+    if (opts->hang_interval)
+        [cmdline appendFormat:@" nlb.hang_interval=%u", opts->hang_interval];
+    if (opts->hang_stopcont)
+        [cmdline appendFormat:@" nlb.hang_stopcont=%u", opts->hang_stopcont];
+    if (opts->hang_fail)
+        [cmdline appendFormat:@" nlb.hang_fail=%u", opts->hang_fail];
+    if (opts->diag_build_dir) {
+        /* gethostname, not NSProcessInfo.hostName: the latter can block on
+         * a reverse DNS lookup. */
+        char host[256] = "localhost";
+        gethostname(host, sizeof(host) - 1);
+        [cmdline appendFormat:@" nlb.diag_dir=/run/nlb/diag nlb.diag_host=%s:%s",
+            host, opts->diag_build_dir];
+    }
 
     return cmdline;
 }
@@ -163,6 +185,14 @@ VZVirtualMachineConfiguration *nlb_create_vm_config(
                 LOG_ERR("Rosetta requires macOS 13.0+");
                 return nil;
             }
+        }
+
+        /* diag share: this build's hang-snapshot directory (--diag-dir).
+         * Unlike topTmpDir it outlives the build, so the snapshots of a
+         * build that nix kills are still there afterwards. */
+        if (opts->diag_build_dir) {
+            NSString *diagDir = [NSString stringWithUTF8String:opts->diag_build_dir];
+            [fsDevices addObject:make_virtiofs_share(@"diag", diagDir)];
         }
 
         config.directorySharingDevices = fsDevices;

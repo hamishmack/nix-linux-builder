@@ -23,6 +23,17 @@ typedef struct {
     bool        verbose;          /* -v / --verbose */
     bool        shell;            /* --shell: interactive shell mode */
     bool        debug;            /* --debug: drop to shell on build failure (requires --shell) */
+
+    /* Hang diagnostics (guest/nlb-watchdog.c).  Thresholds are seconds of
+     * build-log silence; 0 = off. */
+    const char *diag_dir;         /* --diag-dir <dir>: keep snapshots under here */
+    uint32_t    hang_snapshot;    /* --hang-snapshot <s>: first snapshot */
+    uint32_t    hang_interval;    /* --hang-interval <s>: repeat snapshots */
+    uint32_t    hang_stopcont;    /* --hang-stopcont <s>: SIGSTOP/SIGCONT probe */
+    uint32_t    hang_fail;        /* --hang-fail <s>: summarise and fail */
+
+    /* Set by main, not the CLI: this build's directory under diag_dir. */
+    const char *diag_build_dir;
 } nlb_cli_opts;
 
 /*

@@ -5,12 +5,14 @@
 # Builds a minimal CPIO initrd containing:
 #   - busybox (static, provides sh/mount/cp/setuidgid/poweroff/ip/etc.)
 #   - jq (static, for parsing build.json)
+#   - nlb-watchdog (static, guest/nlb-watchdog.c: relays build output and
+#     diagnoses builds that go silent)
 #   - init script (guest/init.sh)
 #
 # VirtioFS and FUSE are built into the kernel (=y), so no modules or kmod needed.
 #
 # Output: $out/initrd (uncompressed CPIO archive)
-{ pkgs, guestInit }:
+{ pkgs, guestInit, watchdog }:
 
 let
   busybox = pkgs.pkgsStatic.busybox;
@@ -43,6 +45,10 @@ in pkgs.stdenv.mkDerivation {
     # ── jq (static binary, for parsing build.json) ──────────────────
     cp ${jq}/bin/jq initrd-root/bin/jq
     chmod 755 initrd-root/bin/jq
+
+    # ── nlb-watchdog (static, runs the builder; see guest/nlb-watchdog.c)
+    cp ${watchdog}/bin/nlb-watchdog initrd-root/bin/nlb-watchdog
+    chmod 755 initrd-root/bin/nlb-watchdog
 
     # ── mke2fs (static, for formatting /build scratch image) ──────
     cp ${e2fsprogs}/bin/mke2fs initrd-root/bin/mke2fs

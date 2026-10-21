@@ -60,7 +60,15 @@ let
     (lib.optional cfg.network [ "--network" ])
     (lib.optional cfg.ramdiskTmp [ "--ramdisk-tmp" ])
     (lib.optional cfg.verbose [ "--verbose" ])
+    (lib.optionals hang.enable [
+      "--diag-dir" hang.dir
+      "--hang-snapshot" (toString hang.snapshotAfter)
+      "--hang-interval" (toString hang.interval)
+      "--hang-stopcont" (toString hang.stopContAfter)
+      "--hang-fail" (toString hang.failAfter)
+    ])
   ];
+  hang = cfg.hangDiagnostics;
   # nix-linux-shell wrapper: substitutes kernel/initrd/builder paths
   # so users can interactively debug Linux builds without knowing
   # the store paths of guest components.
@@ -142,6 +150,66 @@ in {
       default = false;
       description = "Enable verbose debug logging.";
     };
+
+    # Thresholds are seconds without build output (what nix's
+    # max-silent-time measures); 0 turns that step off.
+    hangDiagnostics = {
+      enable = lib.mkEnableOption ''
+        diagnostics for builds that stop producing output: the guest
+        snapshots the build's processes and threads (state, wchan, syscall,
+        kernel stacks, CPU), PSI, CPU steal and the kernel log
+        into `dir`, and can probe and fail the build with a verdict in its
+        log.  Requires a guest built from this source (`usePrebuilt = false`
+        until a release includes it)'';
+
+      dir = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/log/nix-linux-builder/hangs";
+        description = ''
+          Snapshots go to `<dir>/<UTC time>-<derivation name>-<pid>/`.
+          Builds that never go silent leave nothing behind.
+        '';
+      };
+
+      snapshotAfter = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 1200;
+        description = "First snapshot after this many seconds of silence.";
+      };
+
+      interval = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 600;
+        description = "Further snapshots every this many seconds while silent.";
+      };
+
+      stopContAfter = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 0;
+        description = ''
+          Send SIGSTOP then SIGCONT to every build process once, after this
+          many seconds of silence, and record whether output or CPU comes
+          back (as it does for a lost futex wakeup).
+        '';
+      };
+
+      failAfter = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 0;
+        description = ''
+          Print a summary and verdict to the build log, then fail the build
+          (exit 124), after this many seconds of silence.  Must be below
+          nix's (or Hydra's) max-silent-time: any output resets nix's silence
+          timer, so a summary printed earlier would only postpone the kill.
+        '';
+      };
+
+      retentionDays = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 14;
+        description = "Delete snapshot directories older than this, daily.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -151,6 +219,23 @@ in {
 
     # Install nix-linux-shell wrapper for interactive debugging.
     environment.systemPackages = [ nixLinuxShell ];
+
+    # The builder runs as the nix build user, so the snapshot directory must
+    # be writable by group nixbld; sticky, like /tmp, so builds cannot remove
+    # each other's.
+    system.activationScripts.postActivation.text = lib.mkIf hang.enable ''
+      mkdir -p ${lib.escapeShellArg hang.dir}
+      chown root:nixbld ${lib.escapeShellArg hang.dir}
+      chmod 1775 ${lib.escapeShellArg hang.dir}
+    '';
+
+    launchd.daemons.nix-linux-builder-hang-prune = lib.mkIf hang.enable {
+      script = ''
+        find ${lib.escapeShellArg hang.dir} -mindepth 1 -maxdepth 1 -type d \
+          -mtime +${toString hang.retentionDays} -exec rm -rf {} +
+      '';
+      serviceConfig.StartCalendarInterval = [ { Hour = 4; Minute = 17; } ];
+    };
 
     nix.settings = {
       extra-experimental-features = [ "external-builders" ];

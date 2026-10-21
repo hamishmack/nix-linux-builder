@@ -548,6 +548,62 @@ static void test_timeout_missing_value(void)
 
 /* ── Runner ───────────────────────────────────────────────────────────── */
 
+/* ── Hang diagnostics ──────────────────────────────────────────────────── */
+
+static void test_hang_defaults_off(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(6, argv, &opts));
+    TEST_ASSERT_NULL(opts.diag_dir);
+    TEST_ASSERT_NULL(opts.diag_build_dir);
+    TEST_ASSERT_EQUAL_UINT32(0, opts.hang_snapshot);
+    TEST_ASSERT_EQUAL_UINT32(0, opts.hang_interval);
+    TEST_ASSERT_EQUAL_UINT32(0, opts.hang_stopcont);
+    TEST_ASSERT_EQUAL_UINT32(0, opts.hang_fail);
+}
+
+static void test_hang_options(void)
+{
+    char *argv[] = {
+        "nlb", "--kernel", "/k", "--initrd", "/i",
+        "--diag-dir", "/var/log/nlb", "--hang-snapshot", "1200",
+        "--hang-interval", "600", "--hang-stopcont", "3600",
+        "--hang-fail", "6600", "build.json"
+    };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(16, argv, &opts));
+    TEST_ASSERT_EQUAL_STRING("/var/log/nlb", opts.diag_dir);
+    TEST_ASSERT_EQUAL_UINT32(1200, opts.hang_snapshot);
+    TEST_ASSERT_EQUAL_UINT32(600, opts.hang_interval);
+    TEST_ASSERT_EQUAL_UINT32(3600, opts.hang_stopcont);
+    TEST_ASSERT_EQUAL_UINT32(6600, opts.hang_fail);
+}
+
+static void test_hang_negative_rejected(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--hang-fail", "-1", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(-1, nlb_cli_parse(8, argv, &opts));
+}
+
+static void test_hang_garbage_rejected(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--hang-snapshot", "20m", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(-1, nlb_cli_parse(8, argv, &opts));
+}
+
+static void test_diag_dir_empty_rejected(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--diag-dir", "", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(-1, nlb_cli_parse(8, argv, &opts));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -625,6 +681,12 @@ int main(void)
     RUN_TEST(test_initrd_missing_value);
     RUN_TEST(test_cpu_count_missing_value);
     RUN_TEST(test_timeout_missing_value);
+
+    RUN_TEST(test_hang_defaults_off);
+    RUN_TEST(test_hang_options);
+    RUN_TEST(test_hang_negative_rejected);
+    RUN_TEST(test_hang_garbage_rejected);
+    RUN_TEST(test_diag_dir_empty_rejected);
 
     return UNITY_END();
 }

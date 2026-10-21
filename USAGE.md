@@ -33,8 +33,60 @@ Options:
   -v, --verbose           Enable verbose logging
   -h, --help              Show help message
 
+Hang diagnostics (seconds of build-log silence, 0 = off):
+  --diag-dir <dir>        Keep hang snapshots in <dir>/<time>-<name>-<pid>/
+  --hang-snapshot <s>     Snapshot the build's processes after <s> (default: 0)
+  --hang-interval <s>     ...and every <s> after that (default: 600)
+  --hang-stopcont <s>     SIGSTOP/SIGCONT the build once after <s> (default: 0)
+  --hang-fail <s>         Print a diagnosis and fail the build after <s> (default: 0)
+
 Positional:
   <build.json>            Path to nix build specification JSON file
+```
+
+## Hang diagnostics
+
+A build that hangs inside the VM usually ends with nix's
+`timed out after N seconds` (max-silent-time) and nothing else: nix kills the
+VM, and with it every clue. With the `--hang-*` options the guest watches the
+build's output and, once it has been silent long enough, records why:
+
+```bash
+nix-linux-builder ... \
+  --diag-dir /var/log/nix-linux-builder/hangs \
+  --hang-snapshot 1200 --hang-interval 600 \
+  --hang-stopcont 3600 --hang-fail 6600 build.json
+```
+
+- `--hang-snapshot` / `--hang-interval`: write `snapshot-NNN.txt` files to
+  `<diag-dir>/<UTC time>-<derivation name>-<pid>/`. Each lists every build
+  thread (state, wchan, syscall, CPU % since the previous snapshot, context
+  switches), every build process (command line, I/O), kernel stacks of the
+  sleeping and blocked threads, PSI, `/proc/stat` and the kernel log tail. If output resumes, a
+  `resumed-after-NNN.txt` says so (a slow build, not a hang). Builds that
+  never go silent leave no directory behind.
+- `--hang-stopcont`: SIGSTOP then SIGCONT every build process once. Output
+  coming back afterwards points at a lost wakeup in user space.
+- `--hang-fail`: print a verdict and the build's threads to the build log, kill
+  the build and exit 124. Keep it **below** nix's max-silent-time: any output
+  resets nix's timer, so the verdict has to come with the failure. The verdict
+  is one of:
+  - `VIRTIOFS`: threads in D state waiting on FUSE (VirtioFS): the host side of
+    a share stopped answering;
+  - `KERNEL-BLOCKED`: threads in D state elsewhere;
+  - `BUSY`: the build is using CPU but printing nothing (spin, livelock,
+    infinite loop);
+  - `IDLE`: everything asleep (deadlock, lost wakeup), with the SIGSTOP/SIGCONT
+    outcome if the probe ran.
+
+With the darwin module:
+
+```nix
+services.nix-linux-builder.hangDiagnostics = {
+  enable = true;
+  stopContAfter = 3600;
+  failAfter = 6600;   # Hydra's default max-silent-time is 7200
+};
 ```
 
 ## Interactive Shell (nix-linux-shell)

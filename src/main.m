@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "cli.h"
@@ -33,6 +34,41 @@
 #include "log.h"
 #import "vm_config.h"
 #import "vm_lifecycle.h"
+
+/* ── Hang diagnostics directory ─────────────────────────────────────────── */
+
+/* Value of the derivation's "name" env var, or "build". */
+static const char *derivation_name(const nlb_build_spec *spec)
+{
+    for (int i = 0; i < spec->nenv; i++)
+        if (strcmp(spec->env[i].key, "name") == 0 && spec->env[i].value[0])
+            return spec->env[i].value;
+    return "build";
+}
+
+/* Create <diag_dir>/<UTC time>-<name>-<pid> for this build's snapshots.
+ * Returns 0 on success.  Failure is not fatal: the build runs without a
+ * diag share (snapshots then stay inside the VM). */
+static int create_diag_build_dir(const char *diag_dir, const nlb_build_spec *spec,
+                                 char *out, size_t out_size)
+{
+    char stamp[32];
+    time_t now = time(NULL);
+    struct tm tm;
+    gmtime_r(&now, &tm);
+    strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &tm);
+    int n = snprintf(out, out_size, "%s/%s-%s-%d", diag_dir, stamp,
+                     derivation_name(spec), (int)getpid());
+    if (n < 0 || (size_t)n >= out_size) {
+        LOG_WARN("diag dir path too long; hang snapshots stay in the VM");
+        return -1;
+    }
+    if (mkdir(out, 0755) != 0) {
+        LOG_WARN("mkdir %s: %s; hang snapshots stay in the VM", out, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
 
 /* Global verbosity flag used by LOG_DBG macro. */
 int nlb_verbose = 0;
@@ -213,10 +249,18 @@ int main(int argc, char *argv[])
         if (nlb_build_spec_needs_rosetta(&spec))
             LOG_DBG("x86_64-linux build: Rosetta will be enabled");
 
+        /* ── 2b. Hang diagnostics: this build's snapshot directory ────── */
+        char diag_build_dir[PATH_MAX] = {0};
+        if (opts.diag_dir && !opts.shell
+            && create_diag_build_dir(opts.diag_dir, &spec, diag_build_dir,
+                                     sizeof(diag_build_dir)) == 0)
+            opts.diag_build_dir = diag_build_dir;
+
         /* ── 3. Create VM configuration ──────────────────────────────── */
         VZVirtualMachineConfiguration *vmConfig =
             nlb_create_vm_config(&opts, &spec);
         if (!vmConfig) {
+            if (opts.diag_build_dir) rmdir(opts.diag_build_dir);
             nlb_build_spec_free(&spec);
             if (bare_tmpdir[0]) rmrf(bare_tmpdir);
             return 1;
@@ -239,6 +283,11 @@ int main(int argc, char *argv[])
         int exit_code = nlb_vm_run(vmConfig, exitcode_path, opts.timeout_secs);
 
         LOG_DBG("VM exited with code %d", exit_code);
+
+        /* Only a build that went silent leaves snapshots; drop the empty
+         * directories of all the others (rmdir fails on a non-empty one). */
+        if (opts.diag_build_dir)
+            rmdir(opts.diag_build_dir);
 
         /* ── 6. Cleanup and exit ─────────────────────────────────────── */
         nlb_build_spec_free(&spec);
