@@ -45,6 +45,7 @@ static const struct option long_options[] = {
     { "hang-interval", required_argument, NULL, 'I' },
     { "hang-stopcont", required_argument, NULL, 'C' },
     { "hang-fail",     required_argument, NULL, 'F' },
+    { "fd-sample",     required_argument, NULL, 'N' },
     { "help",         no_argument,       NULL, 'h' },
     { NULL, 0, NULL, 0 }
 };
@@ -76,6 +77,8 @@ void nlb_cli_usage(const char *prog)
         "  --hang-stopcont <s>     SIGSTOP/SIGCONT the build once after <s> (default: 0)\n"
         "  --hang-fail <s>         Print a diagnosis and fail the build after <s> (default: 0);\n"
         "                          keep it below nix's max-silent-time\n"
+        "  --fd-sample <s>         Sample the guest's and the VM process's open files every\n"
+        "                          <s>, and report them if the build fails (default: 0)\n"
         "  -h, --help              Show this help\n",
         prog, prog);
 }
@@ -198,6 +201,10 @@ int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
             break;
         case 'F':
             if (parse_secs(optarg, "hang-fail", &opts->hang_fail) != 0)
+                return -1;
+            break;
+        case 'N':
+            if (parse_secs(optarg, "fd-sample", &opts->fd_sample) != 0)
                 return -1;
             break;
         case 'h':

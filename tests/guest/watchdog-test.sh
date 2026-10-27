@@ -52,4 +52,14 @@ out=$("$wd" -s 3 -f 5 -d "$tmp/chatty" -- sh -c 'for i in 1 2 3 4 5; do echo $i;
 check "chatty: not failed" [ "$?" = 0 ]
 check "chatty: no snapshots" [ ! -e "$tmp/chatty" ]
 
+# Open-file sampling: a failed build publishes its samples and puts the peak
+# in the log; a successful one leaves nothing behind.
+out=$("$wd" -n 1 -d "$tmp/fds" -- sh -c 'sleep 2; exit 1')
+check "fds: passes exit code" [ "$?" = 1 ]
+check "fds: peak in log" sh -c 'echo "$1" | grep -q "guest open files: peak"' _ "$out"
+check "fds: samples published" [ "$(grep -vc '^#' "$tmp/fds/fd-samples.txt" 2>/dev/null)" -ge 2 ]
+out=$("$wd" -n 1 -d "$tmp/fds-ok" -- sh -c 'sleep 2')
+check "fds: nothing on success" [ ! -e "$tmp/fds-ok" ]
+check "fds: no log line on success" [ -z "$out" ]
+
 exit $fail

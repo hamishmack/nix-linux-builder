@@ -26,6 +26,14 @@ All notable changes to nix-linux-builder are documented in this file.
   `DETECT_HUNG_TASK`, `STACKTRACE`, `PSI` and task I/O
   accounting for it.
 
+- **Open-file sampling for ENFILE failures** (`--fd-sample <s>`, darwin module
+  `hangDiagnostics.fdSampleInterval`, default 30). The guest watchdog records
+  `/proc/sys/fs/file-nr` (and the processes holding the most fds when over half
+  of `fs.file-max` is in use); the host records the open files of the VM's
+  Virtualization.framework process and `kern.num_files`. A failed build gets
+  `fd-samples.txt` and `host-fd-samples.txt` in its diag directory and the
+  peaks in its log.
+
 ### Changed
 - **The builder's stdout and stderr are a pseudo-terminal**, not hvc0 itself,
   and `/dev/pts` is mounted in the guest. The builder still sees a terminal

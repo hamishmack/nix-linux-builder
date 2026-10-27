@@ -27,13 +27,24 @@
  *                              silence timer, so the verdict has to come
  *                              with the failure, not before it.
  *
+ * And, whether the build is silent or not:
+ *
+ *   nlb.fd_sample=N      (-n)  every N seconds record the guest's open files
+ *                              (/proc/sys/fs/file-nr), and the processes
+ *                              holding the most once over half of
+ *                              fs.file-max is in use.  If the build fails,
+ *                              the samples go to the diag dir as
+ *                              fd-samples.txt and one line to the build log
+ *                              gives the peak.  ENFILE ("Too many open files
+ *                              in system") is the failure this is for.
+ *
  * Nothing is printed to the build log before the fail threshold, for the
  * same reason.  Snapshots go to a directory (-d, nlb.diag_dir) — on the
  * farm a VirtioFS share that outlives the VM.  They are first written to
  * the tmpfs root and then copied by a child process, so a VirtioFS stall
  * (one of the things being diagnosed) cannot wedge the watchdog itself.
  *
- * Usage: nlb-watchdog [-s N] [-i N] [-c N] [-f N] [-d DIR] [-H TEXT] -- CMD...
+ * Usage: nlb-watchdog [-s N] [-i N] [-c N] [-f N] [-n N] [-d DIR] [-H TEXT] -- CMD...
  * Exit code: CMD's exit code, 128+signal if it was killed, 124 on hang.
  */
 
@@ -71,6 +82,7 @@ typedef struct {
     long interval;         /* then every interval seconds */
     long stopcont_after;   /* SIGSTOP/SIGCONT probe once */
     long fail_after;       /* summary + kill */
+    long fd_sample;        /* open-file sample every fd_sample seconds */
     const char *diag_dir;  /* where snapshots end up */
     const char *diag_host; /* the host's name for diag_dir, for the summary */
 } config;
@@ -113,6 +125,8 @@ static void config_from_cmdline(config *cfg)
             cfg->stopcont_after = parse_secs(v, tok);
         else if (strcmp(k, "hang_fail") == 0)
             cfg->fail_after = parse_secs(v, tok);
+        else if (strcmp(k, "fd_sample") == 0)
+            cfg->fd_sample = parse_secs(v, tok);
         else if (strcmp(k, "diag_dir") == 0)
             cfg->diag_dir = strdup(v);
         else if (strcmp(k, "diag_host") == 0)
@@ -688,6 +702,148 @@ static void snapshot(const config *cfg, const sample_set *prev, const sample_set
     publish(cfg->diag_dir, staged, name);
 }
 
+/* ── Open-file sampling ────────────────────────────────────────────────── */
+
+/* fd-samples.txt is opened once, at the start, on the tmpfs staging dir:
+ * once the guest is out of file structures, opening it would fail too. */
+static struct {
+    FILE *out;
+    double start;
+    long peak, peak_max;
+    double peak_at;
+    int samples;
+} fds;
+
+/* /proc/sys/fs/file-nr: allocated file structures, 0, fs.file-max. */
+static bool read_file_nr(long *nr, long *max)
+{
+    char buf[128];
+    long unused;
+    if (read_file("/proc/sys/fs/file-nr", buf, sizeof(buf)) <= 0)
+        return false;
+    return sscanf(buf, "%ld %ld %ld", nr, &unused, max) == 3;
+}
+
+/* Open fds of /proc/<pid>, or -1. */
+static long count_fds(const char *pid)
+{
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%s/fd", pid);
+    DIR *d = opendir(path);
+    if (!d)
+        return -1;
+    long n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)))
+        if (e->d_name[0] != '.')
+            n++;
+    closedir(d);
+    return n;
+}
+
+/* The processes holding the most fds, and the total over every process.
+ * file-nr minus that total is file structures no fd points at: files
+ * mapped with mmap, and ones only the kernel holds (an epoll set, fds in
+ * flight over a unix socket). */
+static void fd_top(FILE *out, long nr)
+{
+    enum { TOP = 8 };
+    struct { long n; int pid; char comm[64]; } top[TOP];
+    memset(top, 0, sizeof(top));
+    long total = 0;
+    size_t procs = 0;
+    DIR *proc = opendir("/proc");
+    if (!proc)
+        return;
+    struct dirent *pe;
+    while ((pe = readdir(proc))) {
+        if (!is_numeric(pe->d_name))
+            continue;
+        long n = count_fds(pe->d_name);
+        if (n < 0)
+            continue;
+        total += n;
+        procs++;
+        if (n <= top[TOP - 1].n)
+            continue;
+        int i = TOP - 1;
+        for (; i > 0 && top[i - 1].n < n; i--)
+            top[i] = top[i - 1];
+        top[i].n = n;
+        top[i].pid = atoi(pe->d_name);
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/%s/comm", pe->d_name);
+        if (read_file(path, top[i].comm, sizeof(top[i].comm)) < 0)
+            strcpy(top[i].comm, "?");
+        chomp(top[i].comm);
+    }
+    closedir(proc);
+    fprintf(out, "  fds of all %zu processes: %ld; file structures behind no fd: %ld\n",
+            procs, total, nr - total);
+    for (int i = 0; i < TOP && top[i].n > 0; i++)
+        fprintf(out, "  %9ld  pid %d (%s)\n", top[i].n, top[i].pid, top[i].comm);
+}
+
+static void fd_sample(void)
+{
+    long nr, max;
+    if (!fds.out || !read_file_nr(&nr, &max))
+        return;
+    double at = now_mono() - fds.start;
+    char stamp[32];
+    time_t wall = time(NULL);
+    struct tm tm;
+    gmtime_r(&wall, &tm);
+    strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    fprintf(fds.out, "%s %7.0fs %9ld of %ld\n", stamp, at, nr, max);
+    /* Walking every process's fds is not free; only do it when it matters. */
+    if (nr * 2 >= max)
+        fd_top(fds.out, nr);
+    fflush(fds.out);
+    if (nr > fds.peak) {
+        fds.peak = nr;
+        fds.peak_max = max;
+        fds.peak_at = at;
+    }
+    fds.samples++;
+}
+
+static void fd_sampling_start(const config *cfg)
+{
+    if (cfg->fd_sample <= 0)
+        return;
+    char staged[512];
+    snprintf(staged, sizeof(staged), "%s/fd-samples.txt", staging);
+    fds.out = fopen(staged, "we");
+    if (!fds.out)
+        return;
+    fprintf(fds.out, "# guest open files every %lds (/proc/sys/fs/file-nr): "
+                     "UTC time, time since the build started, allocated of fs.file-max\n",
+            cfg->fd_sample);
+    fds.start = now_mono();
+    fd_sample();
+}
+
+/* The build failed: take a last sample, publish the samples and put the
+ * peak in the build log. */
+static void fd_report(const config *cfg, FILE *log)
+{
+    if (!fds.out)
+        return;
+    fd_sample();
+    fclose(fds.out);
+    fds.out = NULL;
+    char staged[512];
+    snprintf(staged, sizeof(staged), "%s/fd-samples.txt", staging);
+    publish(cfg->diag_dir, staged, "fd-samples.txt");
+    fprintf(log, "nix-linux-builder: guest open files: peak %ld of fs.file-max %ld "
+                 "at %.0f min (%d samples%s%s%s)\n",
+            fds.peak, fds.peak_max, fds.peak_at / 60, fds.samples,
+            cfg->diag_dir ? " in " : "",
+            cfg->diag_dir ? (cfg->diag_host ? cfg->diag_host : cfg->diag_dir) : "",
+            cfg->diag_dir ? "/fd-samples.txt" : "");
+}
+
 /* ── Signalling the build ──────────────────────────────────────────────── */
 
 static size_t signal_build(int sig)
@@ -707,7 +863,7 @@ static size_t signal_build(int sig)
 static void usage(void)
 {
     fprintf(stderr, "usage: nlb-watchdog [-s secs] [-i secs] [-c secs] [-f secs] "
-                    "[-d dir] [-H text] -- command [args...]\n");
+                    "[-n secs] [-d dir] [-H text] -- command [args...]\n");
     exit(2);
 }
 
@@ -726,12 +882,13 @@ int main(int argc, char *argv[])
     config_from_cmdline(&cfg);
 
     int opt;
-    while ((opt = getopt(argc, argv, "+s:i:c:f:d:H:")) != -1) {
+    while ((opt = getopt(argc, argv, "+s:i:c:f:n:d:H:")) != -1) {
         switch (opt) {
         case 's': cfg.snapshot_after = parse_secs(optarg, "-s"); break;
         case 'i': cfg.interval = parse_secs(optarg, "-i"); break;
         case 'c': cfg.stopcont_after = parse_secs(optarg, "-c"); break;
         case 'f': cfg.fail_after = parse_secs(optarg, "-f"); break;
+        case 'n': cfg.fd_sample = parse_secs(optarg, "-n"); break;
         case 'd': cfg.diag_dir = optarg; break;
         case 'H': cfg.diag_host = optarg; break;
         default: usage();
@@ -787,6 +944,8 @@ int main(int argc, char *argv[])
     close(slave);
     build_root = child;
     signal(SIGPIPE, SIG_IGN);
+    fd_sampling_start(&cfg);
+    double next_fd_sample = now_mono() + (double)cfg.fd_sample;
 
     double last_output = now_mono();
     double next_snapshot = 0;      /* silence at which to snapshot next */
@@ -799,6 +958,13 @@ int main(int argc, char *argv[])
     double child_done_at = 0;
 
     for (;;) {
+        /* Here, not below: a build that keeps printing never gets past the
+         * read. */
+        if (fds.out && now_mono() >= next_fd_sample) {
+            fd_sample();
+            next_fd_sample = now_mono() + (double)cfg.fd_sample;
+        }
+
         struct pollfd pfd = { .fd = master, .events = POLLIN };
         int pr = poll(&pfd, 1, 1000);
         if (pr > 0) {
@@ -939,6 +1105,7 @@ int main(int argc, char *argv[])
                 fprintf(log, "nix-linux-builder: %d snapshot(s) in %s\n", snapshot_seq,
                         cfg.diag_host ? cfg.diag_host
                         : cfg.diag_dir ? cfg.diag_dir : "the VM only (lost with it)");
+                fd_report(&cfg, log);
                 fclose(log);
             }
 
@@ -954,6 +1121,14 @@ int main(int argc, char *argv[])
                 nanosleep(&pause, NULL);
             }
             return HANG_EXIT_CODE;
+        }
+    }
+
+    if (status_to_code(status) != 0 && fds.out) {
+        FILE *log = fdopen(dup(STDOUT_FILENO), "w");
+        if (log) {
+            fd_report(&cfg, log);
+            fclose(log);
         }
     }
 

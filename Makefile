@@ -45,7 +45,8 @@ CJSON_CFLAGS := -Wall -O2 -std=c11 -DCJSON_HIDE_SYMBOLS $(DEPFLAGS)
 UNITY_CFLAGS := -Wall -O2 -std=c11 $(DEPFLAGS)
 
 # Source files — project code (strict warnings)
-PROJ_C_SRCS := $(SRCDIR)/cli.c $(SRCDIR)/build_json.c $(SRCDIR)/exitcode.c
+PROJ_C_SRCS := $(SRCDIR)/cli.c $(SRCDIR)/build_json.c $(SRCDIR)/exitcode.c \
+               $(SRCDIR)/fd_monitor.c
 OBJ_SRCS    := $(SRCDIR)/vm_config.m $(SRCDIR)/vm_lifecycle.m $(SRCDIR)/main.m
 
 # Vendored code (relaxed warnings)

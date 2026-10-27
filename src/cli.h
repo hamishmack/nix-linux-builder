@@ -31,6 +31,7 @@ typedef struct {
     uint32_t    hang_interval;    /* --hang-interval <s>: repeat snapshots */
     uint32_t    hang_stopcont;    /* --hang-stopcont <s>: SIGSTOP/SIGCONT probe */
     uint32_t    hang_fail;        /* --hang-fail <s>: summarise and fail */
+    uint32_t    fd_sample;        /* --fd-sample <s>: sample open files */
 
     /* Set by main, not the CLI: this build's directory under diag_dir. */
     const char *diag_build_dir;

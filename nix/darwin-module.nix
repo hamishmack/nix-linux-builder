@@ -66,6 +66,7 @@ let
       "--hang-interval" (toString hang.interval)
       "--hang-stopcont" (toString hang.stopContAfter)
       "--hang-fail" (toString hang.failAfter)
+      "--fd-sample" (toString hang.fdSampleInterval)
     ])
   ];
   hang = cfg.hangDiagnostics;
@@ -201,6 +202,20 @@ in {
           (exit 124), after this many seconds of silence.  Must be below
           nix's (or Hydra's) max-silent-time: any output resets nix's silence
           timer, so a summary printed earlier would only postpone the kill.
+        '';
+      };
+
+      fdSampleInterval = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 30;
+        description = ''
+          Every this many seconds, whether the build is silent or not, record
+          the guest's open files (/proc/sys/fs/file-nr) and those of the VM's
+          Virtualization.framework process on the host.  If the build
+          fails, the samples go to `fd-samples.txt` and
+          `host-fd-samples.txt` in its directory under `dir` and the peaks
+          to its log.  For ENFILE ("Too many open files in system").
+          0 turns it off.
         '';
       };
 

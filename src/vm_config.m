@@ -59,6 +59,8 @@ static NSString *kernel_cmdline(const nlb_cli_opts *opts)
         [cmdline appendFormat:@" nlb.hang_stopcont=%u", opts->hang_stopcont];
     if (opts->hang_fail)
         [cmdline appendFormat:@" nlb.hang_fail=%u", opts->hang_fail];
+    if (opts->fd_sample)
+        [cmdline appendFormat:@" nlb.fd_sample=%u", opts->fd_sample];
     if (opts->diag_build_dir) {
         /* gethostname, not NSProcessInfo.hostName: the latter can block on
          * a reverse DNS lookup. */

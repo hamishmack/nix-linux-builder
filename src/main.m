@@ -31,6 +31,7 @@
 
 #include "cli.h"
 #include "build_json.h"
+#include "fd_monitor.h"
 #include "log.h"
 #import "vm_config.h"
 #import "vm_lifecycle.h"
@@ -280,12 +281,16 @@ int main(int argc, char *argv[])
         }
 
         /* ── 5. Run the VM ───────────────────────────────────────────── */
+        nlb_fd_monitor *fd_monitor =
+            opts.shell ? NULL : nlb_fd_monitor_start(opts.fd_sample);
         int exit_code = nlb_vm_run(vmConfig, exitcode_path, opts.timeout_secs);
 
         LOG_DBG("VM exited with code %d", exit_code);
+        nlb_fd_monitor_finish(fd_monitor, opts.diag_build_dir, exit_code != 0);
 
-        /* Only a build that went silent leaves snapshots; drop the empty
-         * directories of all the others (rmdir fails on a non-empty one). */
+        /* Only a build that went silent leaves snapshots, and only a failed
+         * one fd samples; drop the empty directories of all the others
+         * (rmdir fails on a non-empty one). */
         if (opts.diag_build_dir)
             rmdir(opts.diag_build_dir);
 

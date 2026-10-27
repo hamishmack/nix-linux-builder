@@ -39,6 +39,8 @@ Hang diagnostics (seconds of build-log silence, 0 = off):
   --hang-interval <s>     ...and every <s> after that (default: 600)
   --hang-stopcont <s>     SIGSTOP/SIGCONT the build once after <s> (default: 0)
   --hang-fail <s>         Print a diagnosis and fail the build after <s> (default: 0)
+  --fd-sample <s>         Sample the guest's and the VM process's open files every
+                          <s>, and report them if the build fails (default: 0)
 
 Positional:
   <build.json>            Path to nix build specification JSON file
@@ -78,6 +80,26 @@ nix-linux-builder ... \
     infinite loop);
   - `IDLE`: everything asleep (deadlock, lost wakeup), with the SIGSTOP/SIGCONT
     outcome if the probe ran.
+
+### Open files
+
+`--fd-sample <s>` is for builds that fail with ENFILE ("Too many open files in
+system"). Every `<s>` seconds, silent or not, the guest records
+`/proc/sys/fs/file-nr`, and once more than half of `fs.file-max` is in use,
+the processes holding the most fds and how many file structures no fd points
+at (mmaps, files only the kernel holds). On the host, a thread records how many
+files the VM's `com.apple.Virtualization.VirtualMachine` process holds open
+(it serves the VirtioFS shares, with a host fd per file the guest has looked
+up) and `kern.num_files`. If the build fails, both sets go to the build's diag
+directory as `fd-samples.txt` and `host-fd-samples.txt`, and the build log
+ends with the peaks:
+
+```
+nix-linux-builder: guest open files: peak 41210 of fs.file-max 1220080 at 52 min (107 samples in host:/var/log/.../fd-samples.txt)
+nix-linux-builder: host open files: VM process (pid 62352) peak 91628 at 55 min; kern.num_files peak 276047 of kern.maxfiles 524288 at 49 min (110 samples in /var/log/.../host-fd-samples.txt)
+```
+
+Successful builds report nothing.
 
 With the darwin module:
 

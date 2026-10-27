@@ -561,6 +561,7 @@ static void test_hang_defaults_off(void)
     TEST_ASSERT_EQUAL_UINT32(0, opts.hang_interval);
     TEST_ASSERT_EQUAL_UINT32(0, opts.hang_stopcont);
     TEST_ASSERT_EQUAL_UINT32(0, opts.hang_fail);
+    TEST_ASSERT_EQUAL_UINT32(0, opts.fd_sample);
 }
 
 static void test_hang_options(void)
@@ -569,15 +570,16 @@ static void test_hang_options(void)
         "nlb", "--kernel", "/k", "--initrd", "/i",
         "--diag-dir", "/var/log/nlb", "--hang-snapshot", "1200",
         "--hang-interval", "600", "--hang-stopcont", "3600",
-        "--hang-fail", "6600", "build.json"
+        "--hang-fail", "6600", "--fd-sample", "30", "build.json"
     };
     nlb_cli_opts opts;
-    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(16, argv, &opts));
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(18, argv, &opts));
     TEST_ASSERT_EQUAL_STRING("/var/log/nlb", opts.diag_dir);
     TEST_ASSERT_EQUAL_UINT32(1200, opts.hang_snapshot);
     TEST_ASSERT_EQUAL_UINT32(600, opts.hang_interval);
     TEST_ASSERT_EQUAL_UINT32(3600, opts.hang_stopcont);
     TEST_ASSERT_EQUAL_UINT32(6600, opts.hang_fail);
+    TEST_ASSERT_EQUAL_UINT32(30, opts.fd_sample);
 }
 
 static void test_hang_negative_rejected(void)
