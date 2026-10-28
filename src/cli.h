@@ -32,6 +32,7 @@ typedef struct {
     uint32_t    hang_stopcont;    /* --hang-stopcont <s>: SIGSTOP/SIGCONT probe */
     uint32_t    hang_fail;        /* --hang-fail <s>: summarise and fail */
     uint32_t    fd_sample;        /* --fd-sample <s>: sample open files */
+    uint32_t    drop_caches;      /* --drop-caches <s>: guest drops dentry/inode caches */
 
     /* Set by main, not the CLI: this build's directory under diag_dir. */
     const char *diag_build_dir;

@@ -46,6 +46,7 @@ static const struct option long_options[] = {
     { "hang-stopcont", required_argument, NULL, 'C' },
     { "hang-fail",     required_argument, NULL, 'F' },
     { "fd-sample",     required_argument, NULL, 'N' },
+    { "drop-caches",   required_argument, NULL, 'X' },
     { "help",         no_argument,       NULL, 'h' },
     { NULL, 0, NULL, 0 }
 };
@@ -79,6 +80,9 @@ void nlb_cli_usage(const char *prog)
         "                          keep it below nix's max-silent-time\n"
         "  --fd-sample <s>         Sample the guest's and the VM process's open files every\n"
         "                          <s>, and report them if the build fails (default: 0)\n"
+        "  --drop-caches <s>       Drop the guest's dentry and inode caches every <s>, so\n"
+        "                          VirtioFS releases the host files (and vnodes) behind\n"
+        "                          them (default: 0)\n"
         "  -h, --help              Show this help\n",
         prog, prog);
 }
@@ -205,6 +209,10 @@ int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
             break;
         case 'N':
             if (parse_secs(optarg, "fd-sample", &opts->fd_sample) != 0)
+                return -1;
+            break;
+        case 'X':
+            if (parse_secs(optarg, "drop-caches", &opts->drop_caches) != 0)
                 return -1;
             break;
         case 'h':

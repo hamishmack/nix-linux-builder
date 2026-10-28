@@ -34,6 +34,14 @@ All notable changes to nix-linux-builder are documented in this file.
   `fd-samples.txt` and `host-fd-samples.txt` in its diag directory and the
   peaks in its log.
 
+- **Periodic guest cache drops** (`--drop-caches <s>`, darwin module
+  `dropCachesInterval`, default off). The guest watchdog writes 2 to
+  `/proc/sys/vm/drop_caches` every `<s>` seconds, so VirtioFS forgets the
+  inodes the guest has cached and the host closes the files, and frees the
+  vnodes, behind them. Without it a long build holds a host vnode per inode it
+  ever touched, and the host's vnode table (about 250k on a 16 GiB Mac) runs
+  out: every build on the host then fails with ENFILE.
+
 ### Changed
 - **The builder's stdout and stderr are a pseudo-terminal**, not hvc0 itself,
   and `/dev/pts` is mounted in the guest. The builder still sees a terminal

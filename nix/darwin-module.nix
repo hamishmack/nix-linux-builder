@@ -60,6 +60,8 @@ let
     (lib.optional cfg.network [ "--network" ])
     (lib.optional cfg.ramdiskTmp [ "--ramdisk-tmp" ])
     (lib.optional cfg.verbose [ "--verbose" ])
+    (lib.optional (cfg.dropCachesInterval != 0)
+      [ "--drop-caches" (toString cfg.dropCachesInterval) ])
     (lib.optionals hang.enable [
       "--diag-dir" hang.dir
       "--hang-snapshot" (toString hang.snapshotAfter)
@@ -150,6 +152,23 @@ in {
       type = lib.types.bool;
       default = false;
       description = "Enable verbose debug logging.";
+    };
+
+    dropCachesInterval = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 0;
+      example = 300;
+      description = ''
+        Every this many seconds, the guest drops its dentry and inode caches
+        (`echo 2 > /proc/sys/vm/drop_caches`).  Apple's VirtioFS keeps a
+        host file, and with it a host vnode, for every inode the guest has
+        cached, until the guest forgets it, which a guest with plenty of
+        memory never does.  A long build (GHC: 100k+ inodes) can then
+        exhaust the host's vnode table (`kern.maxvnodes`, about 250k on a
+        16 GiB Mac), and every build on the host fails with ENFILE
+        ("Too many open files in system") whatever `kern.maxfiles` is.
+        Requires a guest built from this source.  0 turns it off.
+      '';
     };
 
     # Thresholds are seconds without build output (what nix's

@@ -62,4 +62,12 @@ out=$("$wd" -n 1 -d "$tmp/fds-ok" -- sh -c 'sleep 2')
 check "fds: nothing on success" [ ! -e "$tmp/fds-ok" ]
 check "fds: no log line on success" [ -z "$out" ]
 
+# Dropping caches every second leaves the build alone: same output, same exit
+# code, nothing added to the log.  (Unprivileged here, so the drop itself
+# fails quietly; in the VM the watchdog runs as root.)
+out=$("$wd" -r 1 -- sh -c 'sleep 3; echo done; exit 4')
+rc=$?
+check "drop caches: passes exit code" [ "$rc" = 4 ]
+check "drop caches: log untouched" [ "$out" = done ]
+
 exit $fail

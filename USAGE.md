@@ -41,6 +41,9 @@ Hang diagnostics (seconds of build-log silence, 0 = off):
   --hang-fail <s>         Print a diagnosis and fail the build after <s> (default: 0)
   --fd-sample <s>         Sample the guest's and the VM process's open files every
                           <s>, and report them if the build fails (default: 0)
+  --drop-caches <s>       Drop the guest's dentry and inode caches every <s>, so
+                          VirtioFS releases the host files (and vnodes) behind
+                          them (default: 0)
 
 Positional:
   <build.json>            Path to nix build specification JSON file
@@ -100,6 +103,22 @@ nix-linux-builder: host open files: VM process (pid 62352) peak 91628 at 55 min;
 ```
 
 Successful builds report nothing.
+
+### Host vnodes
+
+ENFILE can come from the host's vnode table rather than its file table.
+Apple's VirtioFS keeps a host file open, and so a vnode, for every inode the
+guest has cached, until the guest forgets the inode; a guest with plenty of
+memory never does. A long build (GHC touches 100k+ inodes) then holds that
+many vnodes for hours, and once `kern.free_vnodes` runs out (`kern.maxvnodes`
+is about 250k on a 16 GiB Mac) opening any file on the host fails with
+"Too many open files in system", however high `kern.maxfiles` is.
+
+`--drop-caches <s>` (darwin module `dropCachesInterval`) makes the guest drop
+its dentry and inode caches every `<s>` seconds (`echo 2 >
+/proc/sys/vm/drop_caches`), so VirtioFS forgets the inodes and the host closes
+their files. Files the build still has open are not affected; the build only
+pays for looking paths up again.
 
 With the darwin module:
 

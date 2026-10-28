@@ -37,6 +37,17 @@
  *                              fd-samples.txt and one line to the build log
  *                              gives the peak.  ENFILE ("Too many open files
  *                              in system") is the failure this is for.
+ *   nlb.drop_caches=N    (-r)  every N seconds drop the guest's dentry and
+ *                              inode caches (echo 2 > /proc/sys/vm/drop_caches).
+ *                              Apple's VirtioFS keeps a host file, and so a
+ *                              host vnode, for every inode the guest has
+ *                              cached, until the guest forgets it; a guest
+ *                              with plenty of memory never does.  A long build
+ *                              (GHC: 100k+ inodes) then exhausts the host's
+ *                              vnode table (kern.maxvnodes, ~250k on a 16 GiB
+ *                              Mac), and every build on the host fails with
+ *                              ENFILE.  Dropping the caches makes the guest
+ *                              FORGET those inodes; what is still open stays.
  *
  * Nothing is printed to the build log before the fail threshold, for the
  * same reason.  Snapshots go to a directory (-d, nlb.diag_dir) — on the
@@ -44,7 +55,7 @@
  * the tmpfs root and then copied by a child process, so a VirtioFS stall
  * (one of the things being diagnosed) cannot wedge the watchdog itself.
  *
- * Usage: nlb-watchdog [-s N] [-i N] [-c N] [-f N] [-n N] [-d DIR] [-H TEXT] -- CMD...
+ * Usage: nlb-watchdog [-s N] [-i N] [-c N] [-f N] [-n N] [-r N] [-d DIR] [-H TEXT] -- CMD...
  * Exit code: CMD's exit code, 128+signal if it was killed, 124 on hang.
  */
 
@@ -83,6 +94,7 @@ typedef struct {
     long stopcont_after;   /* SIGSTOP/SIGCONT probe once */
     long fail_after;       /* summary + kill */
     long fd_sample;        /* open-file sample every fd_sample seconds */
+    long drop_caches;      /* drop dentry/inode caches every drop_caches seconds */
     const char *diag_dir;  /* where snapshots end up */
     const char *diag_host; /* the host's name for diag_dir, for the summary */
 } config;
@@ -127,6 +139,8 @@ static void config_from_cmdline(config *cfg)
             cfg->fail_after = parse_secs(v, tok);
         else if (strcmp(k, "fd_sample") == 0)
             cfg->fd_sample = parse_secs(v, tok);
+        else if (strcmp(k, "drop_caches") == 0)
+            cfg->drop_caches = parse_secs(v, tok);
         else if (strcmp(k, "diag_dir") == 0)
             cfg->diag_dir = strdup(v);
         else if (strcmp(k, "diag_host") == 0)
@@ -860,10 +874,24 @@ static size_t signal_build(int sig)
 
 /* ── Main loop ─────────────────────────────────────────────────────────── */
 
+/* Drop the dentry and inode caches, so that VirtioFS FORGETs the inodes and
+ * the host closes their files.  Quietly: nothing may reach the build log
+ * (it would reset nix's silence timer), and outside a VM -- the tests run
+ * unprivileged -- the write simply fails. */
+static void drop_caches(void)
+{
+    int fd = open("/proc/sys/vm/drop_caches", O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    ssize_t w = write(fd, "2\n", 2);
+    (void)w;
+    close(fd);
+}
+
 static void usage(void)
 {
     fprintf(stderr, "usage: nlb-watchdog [-s secs] [-i secs] [-c secs] [-f secs] "
-                    "[-n secs] [-d dir] [-H text] -- command [args...]\n");
+                    "[-n secs] [-r secs] [-d dir] [-H text] -- command [args...]\n");
     exit(2);
 }
 
@@ -882,13 +910,14 @@ int main(int argc, char *argv[])
     config_from_cmdline(&cfg);
 
     int opt;
-    while ((opt = getopt(argc, argv, "+s:i:c:f:n:d:H:")) != -1) {
+    while ((opt = getopt(argc, argv, "+s:i:c:f:n:r:d:H:")) != -1) {
         switch (opt) {
         case 's': cfg.snapshot_after = parse_secs(optarg, "-s"); break;
         case 'i': cfg.interval = parse_secs(optarg, "-i"); break;
         case 'c': cfg.stopcont_after = parse_secs(optarg, "-c"); break;
         case 'f': cfg.fail_after = parse_secs(optarg, "-f"); break;
         case 'n': cfg.fd_sample = parse_secs(optarg, "-n"); break;
+        case 'r': cfg.drop_caches = parse_secs(optarg, "-r"); break;
         case 'd': cfg.diag_dir = optarg; break;
         case 'H': cfg.diag_host = optarg; break;
         default: usage();
@@ -946,6 +975,7 @@ int main(int argc, char *argv[])
     signal(SIGPIPE, SIG_IGN);
     fd_sampling_start(&cfg);
     double next_fd_sample = now_mono() + (double)cfg.fd_sample;
+    double next_drop = now_mono() + (double)cfg.drop_caches;
 
     double last_output = now_mono();
     double next_snapshot = 0;      /* silence at which to snapshot next */
@@ -963,6 +993,10 @@ int main(int argc, char *argv[])
         if (fds.out && now_mono() >= next_fd_sample) {
             fd_sample();
             next_fd_sample = now_mono() + (double)cfg.fd_sample;
+        }
+        if (cfg.drop_caches > 0 && now_mono() >= next_drop) {
+            drop_caches();
+            next_drop = now_mono() + (double)cfg.drop_caches;
         }
 
         struct pollfd pfd = { .fd = master, .events = POLLIN };
