@@ -609,6 +609,43 @@ static void test_diag_dir_empty_rejected(void)
     TEST_ASSERT_EQUAL_INT(-1, nlb_cli_parse(8, argv, &opts));
 }
 
+/* ── Boot deadline ─────────────────────────────────────────────────────── */
+
+static void test_boot_timeout_default_off(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(6, argv, &opts));
+    TEST_ASSERT_EQUAL_UINT32(0, opts.boot_timeout);
+}
+
+static void test_boot_timeout(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--boot-timeout", "600", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(8, argv, &opts));
+    TEST_ASSERT_EQUAL_UINT32(600, opts.boot_timeout);
+}
+
+static void test_boot_timeout_garbage_rejected(void)
+{
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--boot-timeout", "10m", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(-1, nlb_cli_parse(8, argv, &opts));
+}
+
+static void test_shell_boot_timeout_ignored(void)
+{
+    /* A shell guest never signals ready, so --shell drops the deadline. */
+    char *argv[] = { "nlb", "--kernel", "/k", "--initrd", "/i",
+                     "--shell", "--boot-timeout", "600", "build.json" };
+    nlb_cli_opts opts;
+    TEST_ASSERT_EQUAL_INT(0, nlb_cli_parse(9, argv, &opts));
+    TEST_ASSERT_EQUAL_UINT32(0, opts.boot_timeout);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -692,6 +729,11 @@ int main(void)
     RUN_TEST(test_hang_negative_rejected);
     RUN_TEST(test_hang_garbage_rejected);
     RUN_TEST(test_diag_dir_empty_rejected);
+
+    RUN_TEST(test_boot_timeout_default_off);
+    RUN_TEST(test_boot_timeout);
+    RUN_TEST(test_boot_timeout_garbage_rejected);
+    RUN_TEST(test_shell_boot_timeout_ignored);
 
     return UNITY_END();
 }

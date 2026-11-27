@@ -18,6 +18,7 @@ typedef struct {
     uint64_t    memory_size;      /* --memory-size <bytes> (default 8GiB) */
     uint32_t    cpu_count;        /* --cpu-count <n> (default host count) */
     uint32_t    timeout_secs;     /* --timeout <seconds> (0 = no timeout) */
+    uint32_t    boot_timeout;     /* --boot-timeout <s>: guest must start the build by then */
     bool        network;          /* --network flag */
     bool        ramdisk_tmp;      /* --ramdisk-tmp flag */
     bool        verbose;          /* -v / --verbose */

@@ -57,6 +57,8 @@ let
       [ "--cpu-count" (toString cfg.cpuCount) ])
     (lib.optional (cfg.timeout != 0)
       [ "--timeout" (toString cfg.timeout) ])
+    (lib.optional (cfg.bootTimeout != 0)
+      [ "--boot-timeout" (toString cfg.bootTimeout) ])
     (lib.optional cfg.network [ "--network" ])
     (lib.optional cfg.ramdiskTmp [ "--ramdisk-tmp" ])
     (lib.optional cfg.verbose [ "--verbose" ])
@@ -128,6 +130,21 @@ in {
       type = lib.types.int;
       default = 0;
       description = "Build timeout in seconds. 0 means unlimited.";
+    };
+
+    bootTimeout = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 0;
+      example = 600;
+      description = ''
+        Seconds the guest has to boot and start the builder before the
+        build fails.  nix waits for the guest's ready line with no timeout,
+        and its `max-silent-time` and `timeout` only start counting once it
+        arrives, so a guest that hangs while booting otherwise holds the
+        build, and a builder slot, forever (and, before the builder runs,
+        so does the hang-diagnostics watchdog).  Requires a guest built
+        from this source.  0 turns it off.
+      '';
     };
 
     network = lib.mkOption {

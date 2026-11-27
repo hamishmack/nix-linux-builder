@@ -10,6 +10,7 @@
  *   - VM crash: return 255
  *   - Timeout: force-stop VM, return 254
  *   - SIGTERM/SIGINT: force-stop VM, return 253
+ *   - No ready file by the boot deadline: force-stop VM, return 252
  */
 
 #import "vm_lifecycle.h"
@@ -18,6 +19,7 @@
 
 #import <Foundation/Foundation.h>
 #include <signal.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,7 +120,9 @@ static void force_stop_vm(VZVirtualMachine *vm, dispatch_queue_t queue)
 
 int nlb_vm_run(VZVirtualMachineConfiguration *config,
                const char *exitcode_path,
-               unsigned int timeout_secs)
+               unsigned int timeout_secs,
+               const char *ready_path,
+               unsigned int boot_timeout_secs)
 {
     @autoreleasepool {
         /* The VM must be created and managed on a serial dispatch queue,
@@ -165,12 +169,37 @@ int nlb_vm_run(VZVirtualMachineConfiguration *config,
                             (int64_t)((uint64_t)timeout_secs * NSEC_PER_SEC))
             : DISPATCH_TIME_FOREVER;
 
-        long result = dispatch_semaphore_wait(doneSem, deadline);
+        /* nix reads the guest's \2 ready line with no timeout, and starts
+         * its max-silent-time and timeout only after it, so a guest that
+         * hangs while booting (before the build and its watchdog start)
+         * would hold the build forever.  Give it until the boot deadline
+         * to create the ready file, which it does just before \2. */
+        BOOL bootTimedOut = NO;
+        long result;
+        if (boot_timeout_secs > 0 && ready_path
+            && (timeout_secs == 0 || boot_timeout_secs < timeout_secs)) {
+            result = dispatch_semaphore_wait(doneSem,
+                dispatch_time(DISPATCH_TIME_NOW,
+                              (int64_t)((uint64_t)boot_timeout_secs * NSEC_PER_SEC)));
+            if (result != 0) {
+                if (access(ready_path, F_OK) == 0)
+                    result = dispatch_semaphore_wait(doneSem, deadline);
+                else
+                    bootTimedOut = YES;
+            }
+        } else {
+            result = dispatch_semaphore_wait(doneSem, deadline);
+        }
 
         int exit_code;
 
         if (startFailed) {
             exit_code = 255;
+        } else if (bootTimedOut) {
+            LOG_ERR("the guest did not start the builder within %u seconds"
+                    " (no %s); stopping the VM", boot_timeout_secs, ready_path);
+            force_stop_vm(vm, vmQueue);
+            exit_code = 252;
         } else if (result != 0) {
             /* Timeout */
             LOG_ERR("build timed out after %u seconds", timeout_secs);

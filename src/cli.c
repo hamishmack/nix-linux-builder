@@ -35,6 +35,7 @@ static const struct option long_options[] = {
     { "memory-size",  required_argument, NULL, 'm' },
     { "cpu-count",    required_argument, NULL, 'c' },
     { "timeout",      required_argument, NULL, 't' },
+    { "boot-timeout", required_argument, NULL, 'B' },
     { "network",      no_argument,       NULL, 'n' },
     { "ramdisk-tmp",  no_argument,       NULL, 'R' },
     { "shell",        no_argument,       NULL, 's' },
@@ -65,6 +66,8 @@ void nlb_cli_usage(const char *prog)
         "  --memory-size <bytes>   VM memory in bytes (default: 8589934592)\n"
         "  --cpu-count <n>         vCPU count (default: host CPU count)\n"
         "  --timeout <seconds>     Build timeout, 0 = none (default: 0)\n"
+        "  --boot-timeout <s>      Fail the build if the guest has not started the\n"
+        "                          builder after <s>, 0 = none (default: 0); see below\n"
         "  --network               Enable NAT networking in guest\n"
         "  --ramdisk-tmp           Use tmpfs for /tmp instead of VirtioFS (faster, limited by RAM)\n"
         "  --shell                 Interactive shell mode (build.json optional)\n"
@@ -83,7 +86,11 @@ void nlb_cli_usage(const char *prog)
         "  --drop-caches <s>       Drop the guest's dentry and inode caches every <s>, so\n"
         "                          VirtioFS releases the host files (and vnodes) behind\n"
         "                          them (default: 0)\n"
-        "  -h, --help              Show this help\n",
+        "  -h, --help              Show this help\n"
+        "\n"
+        "nix waits for the guest's ready line with no timeout, and its\n"
+        "max-silent-time and timeout only start once it has it, so a guest that\n"
+        "hangs while booting holds the build forever without --boot-timeout.\n",
         prog, prog);
 }
 
@@ -215,6 +222,10 @@ int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
             if (parse_secs(optarg, "drop-caches", &opts->drop_caches) != 0)
                 return -1;
             break;
+        case 'B':
+            if (parse_secs(optarg, "boot-timeout", &opts->boot_timeout) != 0)
+                return -1;
+            break;
         case 'h':
             nlb_cli_usage(argv[0]);
             return 1;
@@ -237,6 +248,9 @@ int nlb_cli_parse(int argc, char *argv[], nlb_cli_opts *opts)
                  opts->timeout_secs);
         opts->timeout_secs = 0;
     }
+    /* Likewise the boot deadline: a shell guest never signals ready. */
+    if (opts->shell)
+        opts->boot_timeout = 0;
 
     /* The remaining positional argument is the build.json path.
      * In --shell mode (without --debug), build.json is optional:

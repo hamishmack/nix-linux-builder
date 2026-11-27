@@ -387,9 +387,11 @@ set +x
 # correctly.  See: https://github.com/NixOS/nix/blob/2.34.6/src/libstore/build/build-log.cc
 /bin/busybox stty -opost </dev/console 2>/dev/null || true
 
-# Signal nix that build output starts now.
-# \2 (STX) on a line by itself tells the nix daemon to start
-# capturing everything after this as build log output.
+# Tell the host the build is starting (its --boot-timeout watches for this
+# file: nix waits for the \2 below with no timeout), then signal nix that
+# build output starts now.  \2 (STX) on a line by itself tells the nix
+# daemon to start capturing everything after this as build log output.
+: > /build-info/.ready
 /bin/busybox printf '\2\n'
 
 # Source the environment variables extracted from build.json

@@ -26,6 +26,8 @@ Options:
   --memory-size <bytes>   VM memory in bytes (default: 8589934592 = 8GiB)
   --cpu-count <n>         Number of vCPUs (default: host CPU count)
   --timeout <seconds>     Build timeout, 0 = none (default: 0)
+  --boot-timeout <s>      Fail the build if the guest has not started the
+                          builder after <s>, 0 = none (default: 0)
   --network               Enable NAT networking in guest
   --ramdisk-tmp           Use tmpfs for /tmp instead of VirtioFS (faster, limited by RAM)
   --shell                 Interactive shell mode (build.json optional)

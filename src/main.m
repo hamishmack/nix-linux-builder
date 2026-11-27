@@ -280,10 +280,21 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        /* The guest creates topTmpDir/.ready just before its \2 ready line. */
+        char ready_path[PATH_MAX];
+        n = snprintf(ready_path, sizeof(ready_path), "%s/.ready", spec.top_tmp_dir);
+        if (n < 0 || (size_t)n >= sizeof(ready_path)) {
+            LOG_ERR("ready path too long (topTmpDir=%s)", spec.top_tmp_dir);
+            nlb_build_spec_free(&spec);
+            if (bare_tmpdir[0]) rmrf(bare_tmpdir);
+            return 1;
+        }
+
         /* ── 5. Run the VM ───────────────────────────────────────────── */
         nlb_fd_monitor *fd_monitor =
             opts.shell ? NULL : nlb_fd_monitor_start(opts.fd_sample);
-        int exit_code = nlb_vm_run(vmConfig, exitcode_path, opts.timeout_secs);
+        int exit_code = nlb_vm_run(vmConfig, exitcode_path, opts.timeout_secs,
+                                   ready_path, opts.boot_timeout);
 
         LOG_DBG("VM exited with code %d", exit_code);
         nlb_fd_monitor_finish(fd_monitor, opts.diag_build_dir, exit_code != 0);

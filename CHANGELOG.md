@@ -5,6 +5,15 @@ All notable changes to nix-linux-builder are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Boot deadline** (`--boot-timeout <s>`, darwin module `bootTimeout`,
+  default off). nix reads the guest's `\2` ready line with no timeout and
+  starts its `max-silent-time` and `timeout` only after it, so a guest that
+  hung while booting held its build forever (16 hours on one M4, with an
+  empty log and no hang snapshot, since the watchdog had not started). The
+  guest now creates `topTmpDir/.ready` just before the ready line; if it is
+  missing after `<s>` seconds the host stops the VM and exits with 252, and
+  nix fails the build.
+
 - **Hang diagnostics for builds that stop producing output.** The guest now
   runs the builder under `nlb-watchdog` (guest/nlb-watchdog.c), which relays
   its output to hvc0 from a pseudo-terminal and so knows when the build has
